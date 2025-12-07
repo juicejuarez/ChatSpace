@@ -59,6 +59,15 @@ class TransportProtocol:
         self.timer_thread = None
         self.lock = threading.Lock()
         
+        # Network emulation (for testing)
+        self.network_emulation_enabled = False
+        self.packet_loss_rate = 0.0  # 0.0 to 1.0 (percentage of packets to drop)
+        self.bursty_loss_enabled = False
+        self.burst_state = False  # Current state in burst (True = dropping, False = passing)
+        self.burst_drop_prob = 0.8  # Probability of dropping when in burst state
+        self.burst_enter_prob = 0.1  # Probability of entering burst state
+        self.burst_exit_prob = 0.3  # Probability of exiting burst state
+        
         # Statistics
         self.stats = {
             'packets_sent': 0,
@@ -71,7 +80,9 @@ class TransportProtocol:
             'messages_received': 0,  # Application-level messages
             'out_of_order_packets': 0,  # Packets received out of order
             'message_latencies': [],  # List of message latencies in seconds
-            'start_time': time.time()  # For calculating goodput
+            'start_time': time.time(),  # For calculating goodput
+            'packets_dropped': 0,  # Packets dropped by network emulation
+            'packets_attempted': 0  # Total packets attempted to send
         }
     
     # ===== HEADER AND CHECKSUM (from your original) =====
@@ -247,11 +258,89 @@ class TransportProtocol:
         # When message is fully acknowledged, calculate latency
         # This will be done in _handle_ack when all chunks are acked
     
+    def _should_drop_packet(self) -> bool:
+        """Determine if a packet should be dropped based on network emulation settings"""
+        if not self.network_emulation_enabled:
+            return False
+        
+        self.stats['packets_attempted'] += 1
+        
+        if self.bursty_loss_enabled:
+            # Bursty loss model: state machine with probabilities
+            if self.burst_state:
+                # Currently in burst - high drop probability
+                if random.random() < self.burst_drop_prob:
+                    # Try to exit burst state
+                    if random.random() < self.burst_exit_prob:
+                        self.burst_state = False
+                    return True
+                else:
+                    # Packet passes, try to exit burst
+                    if random.random() < self.burst_exit_prob:
+                        self.burst_state = False
+                    return False
+            else:
+                # Not in burst - low drop probability, but may enter burst
+                if random.random() < self.burst_enter_prob:
+                    self.burst_state = True
+                    # Drop this packet (entering burst)
+                    return True
+                # Normal random loss
+                return random.random() < self.packet_loss_rate
+        else:
+            # Random packet loss
+            return random.random() < self.packet_loss_rate
+    
+    def set_network_profile(self, profile: str):
+        """
+        Set network emulation profile
+        
+        Args:
+            profile: 'clean', 'random_loss', or 'bursty_loss'
+        """
+        self.network_emulation_enabled = True
+        
+        if profile == 'clean':
+            self.packet_loss_rate = 0.0
+            self.bursty_loss_enabled = False
+            logger.info("Network profile: CLEAN (0% packet loss)")
+        
+        elif profile == 'random_loss':
+            self.packet_loss_rate = 0.05  # 5% random packet loss
+            self.bursty_loss_enabled = False
+            logger.info("Network profile: RANDOM LOSS (5% packet loss)")
+        
+        elif profile == 'bursty_loss':
+            self.packet_loss_rate = 0.02  # 2% base loss rate
+            self.bursty_loss_enabled = True
+            self.burst_state = False
+            self.burst_drop_prob = 0.8  # 80% drop when in burst
+            self.burst_enter_prob = 0.1  # 10% chance to enter burst
+            self.burst_exit_prob = 0.3  # 30% chance to exit burst
+            logger.info("Network profile: BURSTY LOSS (bursty packet loss)")
+        
+        else:
+            raise ValueError(f"Unknown network profile: {profile}")
+    
+    def disable_network_emulation(self):
+        """Disable network emulation"""
+        self.network_emulation_enabled = False
+        logger.info("Network emulation disabled")
+    
     def _send_packet_to(self, conn: Connection, flags: int, seq: int, 
                         ack: int, data: bytes = b''):
         """Send a packet to a specific connection"""
         if not self.socket:
             return
+        
+        # Network emulation: simulate packet loss
+        if self._should_drop_packet():
+            self.stats['packets_dropped'] += 1
+            logger.debug(f"Network emulation: Dropped packet seq={seq}, flags={flags}")
+            # Still track time for RTT (even though packet is dropped)
+            if flags & self.FLAG_DATA:
+                conn.packet_times[seq] = time.time()
+            return  # Packet is dropped, don't send
         
         header = self._create_header(flags, seq, ack, len(data), 0, data)
         packet = header + data
@@ -611,5 +700,12 @@ class TransportProtocol:
             stats['out_of_order_percentage'] = (stats['out_of_order_packets'] / total_packets) * 100
         else:
             stats['out_of_order_percentage'] = 0.0
+        
+        # Calculate network emulation statistics
+        packets_attempted = stats.get('packets_attempted', 0)
+        if packets_attempted > 0:
+            stats['packet_drop_percentage'] = (stats.get('packets_dropped', 0) / packets_attempted) * 100
+        else:
+            stats['packet_drop_percentage'] = 0.0
         
         return stats

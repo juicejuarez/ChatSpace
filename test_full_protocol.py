@@ -306,6 +306,201 @@ def test_statistics():
         protocol_server.stop()
         time.sleep(0.5)
 
+def test_network_emulation_clean():
+    """Test 6: Clean network (no packet loss)"""
+    print("\n" + "="*60)
+    print("TEST 6: Network Emulation - CLEAN NETWORK")
+    print("="*60)
+    
+    messages_received = []
+    
+    def on_new_connection(conn):
+        def on_message(data):
+            msg = data.decode('utf-8')
+            messages_received.append(msg)
+            print(f"[Server] Received: {msg}")
+        
+        protocol_server.on_message(conn, on_message)
+    
+    protocol_server = TransportProtocol(local_port=15010)
+    protocol_server.set_network_profile('clean')
+    protocol_server.on_new_connection(on_new_connection)
+    protocol_server.start()
+    
+    time.sleep(0.5)
+    
+    protocol_client = TransportProtocol(local_port=15011)
+    protocol_client.set_network_profile('clean')
+    
+    try:
+        conn = protocol_client.connect(('127.0.0.1', 15010))
+        
+        # Send multiple messages
+        num_messages = 10
+        for i in range(num_messages):
+            msg = f"Clean test message {i+1}"
+            protocol_client.send_msg(conn, msg.encode('utf-8'))
+            time.sleep(0.1)
+        
+        # Wait for all messages
+        time.sleep(3)
+        
+        # Get statistics
+        server_stats = protocol_server.get_stats()
+        client_stats = protocol_client.get_stats()
+        
+        print(f"\n[Server] Packets attempted: {server_stats.get('packets_attempted', 0)}")
+        print(f"[Server] Packets dropped: {server_stats.get('packets_dropped', 0)}")
+        print(f"[Server] Drop rate: {server_stats.get('packet_drop_percentage', 0):.2f}%")
+        print(f"[Client] Packets attempted: {client_stats.get('packets_attempted', 0)}")
+        print(f"[Client] Packets dropped: {client_stats.get('packets_dropped', 0)}")
+        print(f"[Client] Drop rate: {client_stats.get('packet_drop_percentage', 0):.2f}%")
+        
+        # Verify all messages received
+        if len(messages_received) == num_messages:
+            print(f"\n✓ TEST PASSED: All {num_messages} messages received on clean network")
+            return True
+        else:
+            print(f"\n✗ TEST FAILED: Expected {num_messages}, got {len(messages_received)}")
+            return False
+        
+    finally:
+        protocol_client.stop()
+        protocol_server.stop()
+        time.sleep(0.5)
+
+def test_network_emulation_random_loss():
+    """Test 7: Random packet loss (5% loss rate)"""
+    print("\n" + "="*60)
+    print("TEST 7: Network Emulation - RANDOM PACKET LOSS")
+    print("="*60)
+    
+    messages_received = []
+    
+    def on_new_connection(conn):
+        def on_message(data):
+            msg = data.decode('utf-8')
+            messages_received.append(msg)
+            print(f"[Server] Received: {msg}")
+        
+        protocol_server.on_message(conn, on_message)
+    
+    protocol_server = TransportProtocol(local_port=15012)
+    protocol_server.set_network_profile('random_loss')
+    protocol_server.on_new_connection(on_new_connection)
+    protocol_server.start()
+    
+    time.sleep(0.5)
+    
+    protocol_client = TransportProtocol(local_port=15013)
+    protocol_client.set_network_profile('random_loss')
+    
+    try:
+        conn = protocol_client.connect(('127.0.0.1', 15012))
+        
+        # Send more messages to see retransmissions
+        num_messages = 20
+        for i in range(num_messages):
+            msg = f"Random loss test message {i+1}"
+            protocol_client.send_msg(conn, msg.encode('utf-8'))
+            time.sleep(0.1)
+        
+        # Wait longer for retransmissions
+        time.sleep(5)
+        
+        # Get statistics
+        server_stats = protocol_server.get_stats()
+        client_stats = protocol_client.get_stats()
+        
+        print(f"\n[Server] Packets attempted: {server_stats.get('packets_attempted', 0)}")
+        print(f"[Server] Packets dropped: {server_stats.get('packets_dropped', 0)}")
+        print(f"[Server] Drop rate: {server_stats.get('packet_drop_percentage', 0):.2f}%")
+        print(f"[Server] Retransmissions: {server_stats.get('packets_retransmitted', 0)}")
+        print(f"[Client] Packets attempted: {client_stats.get('packets_attempted', 0)}")
+        print(f"[Client] Packets dropped: {client_stats.get('packets_dropped', 0)}")
+        print(f"[Client] Drop rate: {client_stats.get('packet_drop_percentage', 0):.2f}%")
+        print(f"[Client] Retransmissions: {client_stats.get('packets_retransmitted', 0)}")
+        
+        # Verify all messages received (protocol should handle retransmissions)
+        if len(messages_received) == num_messages:
+            print(f"\n✓ TEST PASSED: All {num_messages} messages received despite random packet loss")
+            print(f"   Protocol successfully handled {server_stats.get('packets_dropped', 0) + client_stats.get('packets_dropped', 0)} dropped packets")
+            return True
+        else:
+            print(f"\n✗ TEST FAILED: Expected {num_messages}, got {len(messages_received)}")
+            return False
+        
+    finally:
+        protocol_client.stop()
+        protocol_server.stop()
+        time.sleep(0.5)
+
+def test_network_emulation_bursty_loss():
+    """Test 8: Bursty packet loss (clustered loss events)"""
+    print("\n" + "="*60)
+    print("TEST 8: Network Emulation - BURSTY PACKET LOSS")
+    print("="*60)
+    
+    messages_received = []
+    
+    def on_new_connection(conn):
+        def on_message(data):
+            msg = data.decode('utf-8')
+            messages_received.append(msg)
+            print(f"[Server] Received: {msg}")
+        
+        protocol_server.on_message(conn, on_message)
+    
+    protocol_server = TransportProtocol(local_port=15014)
+    protocol_server.set_network_profile('bursty_loss')
+    protocol_server.on_new_connection(on_new_connection)
+    protocol_server.start()
+    
+    time.sleep(0.5)
+    
+    protocol_client = TransportProtocol(local_port=15015)
+    protocol_client.set_network_profile('bursty_loss')
+    
+    try:
+        conn = protocol_client.connect(('127.0.0.1', 15014))
+        
+        # Send many messages to observe bursty behavior
+        num_messages = 30
+        for i in range(num_messages):
+            msg = f"Bursty loss test message {i+1}"
+            protocol_client.send_msg(conn, msg.encode('utf-8'))
+            time.sleep(0.05)  # Faster sending to see bursts
+        
+        # Wait longer for retransmissions during bursts
+        time.sleep(6)
+        
+        # Get statistics
+        server_stats = protocol_server.get_stats()
+        client_stats = protocol_client.get_stats()
+        
+        print(f"\n[Server] Packets attempted: {server_stats.get('packets_attempted', 0)}")
+        print(f"[Server] Packets dropped: {server_stats.get('packets_dropped', 0)}")
+        print(f"[Server] Drop rate: {server_stats.get('packet_drop_percentage', 0):.2f}%")
+        print(f"[Server] Retransmissions: {server_stats.get('packets_retransmitted', 0)}")
+        print(f"[Client] Packets attempted: {client_stats.get('packets_attempted', 0)}")
+        print(f"[Client] Packets dropped: {client_stats.get('packets_dropped', 0)}")
+        print(f"[Client] Drop rate: {client_stats.get('packet_drop_percentage', 0):.2f}%")
+        print(f"[Client] Retransmissions: {client_stats.get('packets_retransmitted', 0)}")
+        
+        # Verify all messages received (protocol should handle bursty retransmissions)
+        if len(messages_received) == num_messages:
+            print(f"\n✓ TEST PASSED: All {num_messages} messages received despite bursty packet loss")
+            print(f"   Protocol successfully handled bursty loss with {server_stats.get('packets_dropped', 0) + client_stats.get('packets_dropped', 0)} dropped packets")
+            return True
+        else:
+            print(f"\n✗ TEST FAILED: Expected {num_messages}, got {len(messages_received)}")
+            return False
+        
+    finally:
+        protocol_client.stop()
+        protocol_server.stop()
+        time.sleep(0.5)
+
 def main():
     """Run all tests"""
     print("="*60)
@@ -317,6 +512,7 @@ def main():
     print("  - Error detection (checksums)")
     print("  - RTT estimation")
     print("  - Server and client modes")
+    print("  - Network emulation (packet loss)")
     
     results = []
     
@@ -326,6 +522,9 @@ def main():
         results.append(("Large Message", test_large_message()))
         results.append(("JSON Messages", test_json_messages()))
         results.append(("Statistics", test_statistics()))
+        results.append(("Network: Clean", test_network_emulation_clean()))
+        results.append(("Network: Random Loss", test_network_emulation_random_loss()))
+        results.append(("Network: Bursty Loss", test_network_emulation_bursty_loss()))
         
     except KeyboardInterrupt:
         print("\n\nTests interrupted by user")
